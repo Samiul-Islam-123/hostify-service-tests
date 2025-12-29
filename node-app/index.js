@@ -1,71 +1,77 @@
-const http = require("http");
-
+const express = require("express");
+const app = express();
 const PORT = process.env.PORT || 3000;
-let memoryLeak = [];
 
-/* ---------------- EXPONENTIAL MEMORY + CPU HOG ---------------- */
-function expand() {
-  // 1. Exponential growth: We don't just add, we double the existing leak + a base
-  // This will hit GBs of usage extremely fast.
-  const currentLen = memoryLeak.length;
-  const growthFactor = currentLen === 0 ? 1 : currentLen * 2;
-  
-  for (let i = 0; i < growthFactor; i++) {
-    // Allocating large Buffers outside of the V8 Heap (RSS growth)
-    memoryLeak.push(Buffer.alloc(10 * 1024 * 1024)); // 10MB chunks
-  }
+// Global array to prevent Garbage Collection (The "Black Hole")
+const memoryBlackHole = [];
+let iteration = 0;
 
-  // 2. Event Loop Blocking (CPU Hog)
-  // We use a while loop that scales with the memory leak to ensure 100% CPU
-  const end = Date.now() + (500 + (currentLen * 100)); 
-  while (Date.now() < end) {
-    Math.pow(Math.random(), Math.random());
-  }
+/* ---------------- THE EXPONENTIAL HOG ---------------- */
+// Runs every second, doubling the pressure each time
+setInterval(() => {
+    iteration++;
+    
+    // 1. Exponential Memory Growth: 2^iteration
+    // We allocate chunks of 50MB, increasing the count exponentially
+    const chunksToAllocate = Math.pow(2, iteration); 
+    console.log(`[!] Cycle ${iteration}: Allocating ${chunksToAllocate} new 50MB chunks...`);
 
-  console.log(`[HOG] RSS: ${(process.memoryUsage().rss / 1024 / 1024).toFixed(2)} MB | Chunks: ${memoryLeak.length}`);
-  
-  // Exponentially decrease the interval time to create a "death spiral"
-  const nextDelay = Math.max(10, 2000 - (currentLen * 500));
-  setTimeout(expand, nextDelay);
+    try {
+        for (let i = 0; i < chunksToAllocate; i++) {
+            // Using Buffer.alloc targets Resident Set Size (RSS) directly
+            memoryBlackHole.push(Buffer.alloc(50 * 1024 * 1024)); 
+        }
+    } catch (e) {
+        console.error("FATAL: Out of system memory!");
+    }
+
+    // 2. CPU Saturation (Blocking the Event Loop)
+    // Synchronous loop that runs longer every cycle
+    const end = Date.now() + (100 * iteration); 
+    while (Date.now() < end) {
+        Math.sqrt(Math.random() * Math.random()) / Math.random();
+    }
+
+    const usage = process.memoryUsage();
+    console.log(`[STATUS] RSS: ${(usage.rss / 1024 / 1024).toFixed(2)} MB | Heap: ${(usage.heapUsed / 1024 / 1024).toFixed(2)} MB`);
+}, 1000);
+
+/* ---------------- HEAVY COMPUTATION FUNCTION ---------------- */
+function performBruteForceCalc() {
+    let result = 0;
+    // Massive array creation to stress the V8 Heap
+    const data = Array.from({ length: 1000000 }, (_, i) => {
+        result += Math.atan(i) * Math.tan(i);
+        return result;
+    });
+    return { 
+        sum: result, 
+        sample: data.slice(-5),
+        loadSize: data.length 
+    };
 }
 
-// Start the spiral
-expand();
+/* ---------------- EXPRESS ENDPOINTS ---------------- */
 
-/* ---------------- UPDATED HEAVY CALCULATION ---------------- */
-function heavyCalculation() {
-  // Create massive local objects that pressure the Garbage Collector
-  return Array.from({ length: 1e6 }, () => ({
-    data: Math.random(),
-    ref: new Array(100).fill("🚀")
-  }));
-}
+app.get("/", (req, res) => {
+    // Every request triggers a heavy calculation
+    const calculation = performBruteForceCalc();
+    
+    // Every request also leaks the calculation result into global memory
+    memoryBlackHole.push(calculation);
 
-/* ---------------- HTTP SERVER ---------------- */
-const server = http.createServer((req, res) => {
-  if (req.url === "/health") {
-    res.end("STILL ALIVE");
-    return;
-  }
-
-  // Every request now contributes to the global leak
-  if (req.url === "/") {
-    const context = heavyCalculation();
-    memoryLeak.push(context); // Leak the request data globally
-
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ 
-        status: "Memory consumed", 
-        current_rss: process.memoryUsage().rss 
-    }));
-    return;
-  }
-
-  res.statusCode = 404;
-  res.end("Not Found");
+    res.json({
+        message: "High computation complete & memory leaked.",
+        result: calculation.sum,
+        system_rss_mb: (process.memoryUsage().rss / 1024 / 1024).toFixed(2)
+    });
 });
 
-server.listen(PORT, () => {
-  console.log(`💀 Chaos Server running on port ${PORT}`);
-  console.log(`[!] Warning: This will consume all available RAM rapidly.`);
+app.get("/health", (req, res) => {
+    res.send("If you see this, the Event Loop isn't fully dead yet.");
+});
+
+app.listen(PORT, () => {
+    console.log(`💀 Exponential Hog listening on port ${PORT}`);
+    console.log(`WARNING: System instability expected within seconds.`);
 });
