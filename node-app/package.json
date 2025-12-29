@@ -1,0 +1,11 @@
+{
+  "name": "node-http-hog",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+
